@@ -712,7 +712,7 @@ function detectCoincidentRoutes({ relations, endpointIds, pathFor, diagramType, 
       const connId = conn.id ? ` id "${conn.id}"` : '';
       const existingId = existing.conn.id ? ` id "${existing.conn.id}"` : '';
 
-      const message = `[composition/coincident-routes] showcase ${diagramType} ${relationCollection}[${index}]${connId} "${conn.from}" -> "${conn.to}" has identical geometry to ${relationCollection}[${existing.index}]${existingId} "${existing.conn.from}" -> "${existing.conn.to}" (${direction}) — readers cannot distinguish the connections. Add explicit via points, use channelX/channelY offset, or adjust fromSide/toSide to separate routes.`;
+      const message = `[composition/coincident-routes] showcase ${diagramType} ${relationCollection}[${index}]${connId} "${conn.from}" -> "${conn.to}" has identical geometry to ${relationCollection}[${existing.index}]${existingId} "${existing.conn.from}" -> "${existing.conn.to}" (${direction}) — the shared geometry may be ambiguous; confirm that labels clearly identify each direction, or separate the routes with explicit via points, channelX/channelY offset, or fromSide/toSide.`;
 
       recordDiagnostic({
         code: 'composition/coincident-routes',

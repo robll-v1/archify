@@ -51,6 +51,37 @@ test('anti-parallel connections with labelAt warn in showcase composition', asyn
   }
 });
 
+test('clearly attributed coincident directions remain deliverable with a warning', async () => {
+  const json = {
+    schema_version: 1,
+    diagram_type: 'architecture',
+    meta: { title: 'Attributed bidirectional line', quality_profile: 'showcase', viewBox: [900, 420] },
+    components: [
+      { id: 'graph', type: 'backend', label: 'the graph', pos: [80, 170], size: [200, 62] },
+      { id: 'engine', type: 'backend', label: 'the engine', pos: [430, 170], size: [200, 62] },
+    ],
+    connections: [
+      { id: 'reads', from: 'graph', to: 'engine', label: 'graph -> engine: lists', labelAt: [355, 150] },
+      { id: 'declares', from: 'engine', to: 'graph', label: 'engine -> graph: declares', labelAt: [355, 260] },
+    ],
+  };
+  const input = path.join(__dirname, 'temp-attributed-antiparallel.json');
+  const output = path.join(__dirname, 'temp-attributed-antiparallel.html');
+  try {
+    fs.writeFileSync(input, JSON.stringify(json, null, 2));
+    const { stdout } = await execAsync(
+      `node "${archifyBin}" deliver architecture "${input}" "${output}" --quality showcase --json`
+    );
+    const result = JSON.parse(stdout);
+    assert.equal(result.ok, true);
+    assert.equal(result.validation.errors, 0);
+    assert.ok(result.validation.warnings >= 1);
+  } finally {
+    if (fs.existsSync(input)) fs.unlinkSync(input);
+    if (fs.existsSync(output)) fs.unlinkSync(output);
+  }
+});
+
 test('anti-parallel connections without labelAt hit label clearance (known limitation)', async () => {
   // This test demonstrates the known limitation: without labelAt, automatic spreading
   // gives minimal separation (~14px typical) that may still fail label clearance checks
