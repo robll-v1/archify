@@ -297,3 +297,121 @@ test('numeric coordinate normalization handles lexicographic edge cases', async 
     if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
   }
 });
+
+test('explicit via geometry separates an anti-parallel pair and keeps both labels', async () => {
+  // Success regression: the documented repair routes one edge around the pair
+  // instead of removing labelAt, so both labels survive and showcase passes.
+  const json = {
+    schema_version: 1,
+    diagram_type: 'architecture',
+    meta: {
+      title: 'Repaired anti-parallel pair',
+      quality_profile: 'showcase',
+      viewBox: [900, 420],
+    },
+    components: [
+      { id: 'graph', type: 'backend', label: 'the graph', pos: [80, 170], size: [200, 62] },
+      { id: 'engine', type: 'backend', label: 'the engine', pos: [430, 170], size: [200, 62] },
+    ],
+    connections: [
+      {
+        id: 'reads',
+        from: 'graph',
+        to: 'engine',
+        label: 'lists',
+        fromSide: 'top',
+        toSide: 'top',
+        via: [[180, 100], [530, 100]],
+        labelAt: [355, 80],
+      },
+      { id: 'declares', from: 'engine', to: 'graph', label: 'declares', labelAt: [355, 260] },
+    ],
+  };
+
+  const tempInput = path.join(__dirname, 'temp-antiparallel-repaired.json');
+  const tempOutput = path.join(__dirname, 'temp-antiparallel-repaired.html');
+
+  try {
+    fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
+
+    const { stdout } = await execAsync(
+      `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
+    );
+
+    const result = JSON.parse(stdout);
+    assert.equal(result.ok, true, 'Explicit via geometry should pass showcase');
+
+    const hasCoincidentDiagnostic = result.diagnostics?.some(
+      (d) => d.code === 'composition/coincident-routes'
+    );
+    assert.ok(!hasCoincidentDiagnostic, 'Separated routes are not coincident');
+  } finally {
+    if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
+    if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+  }
+});
+
+test('removing either labelAt does not repair a coincident anti-parallel pair', async () => {
+  // Guards the documented caveat: dropping labelAt is not a repair. One removal
+  // leaves the surviving labeled edge out of automatic spreading (still
+  // coincident); removing both trades the coincidence for a clearance failure.
+  const base = {
+    schema_version: 1,
+    diagram_type: 'architecture',
+    meta: {
+      title: 'labelAt removal does not repair',
+      quality_profile: 'showcase',
+      viewBox: [900, 420],
+    },
+    components: [
+      { id: 'graph', type: 'backend', label: 'the graph', pos: [80, 170], size: [200, 62] },
+      { id: 'engine', type: 'backend', label: 'the engine', pos: [430, 170], size: [200, 62] },
+    ],
+    connections: [
+      { id: 'reads', from: 'graph', to: 'engine', label: 'lists', labelAt: [355, 150] },
+      { id: 'declares', from: 'engine', to: 'graph', label: 'declares', labelAt: [355, 260] },
+    ],
+  };
+
+  const cases = [
+    { name: 'first', drop: ['reads'], expected: 'composition/coincident-routes' },
+    { name: 'second', drop: ['declares'], expected: 'composition/coincident-routes' },
+    { name: 'both', drop: ['reads', 'declares'], expected: 'composition/label-route-clearance' },
+  ];
+
+  for (const { name, drop, expected } of cases) {
+    const json = JSON.parse(JSON.stringify(base));
+    for (const conn of json.connections) {
+      if (drop.includes(conn.id)) delete conn.labelAt;
+    }
+
+    const tempInput = path.join(__dirname, `temp-labelat-removal-${name}.json`);
+    const tempOutput = path.join(__dirname, `temp-labelat-removal-${name}.html`);
+
+    try {
+      fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
+
+      await assert.rejects(
+        async () => {
+          await execAsync(
+            `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
+          );
+        },
+        (err) => {
+          const result = JSON.parse(err.stdout);
+          assert.equal(result.ok, false, `Removing ${name} labelAt should still fail`);
+          const codes = (result.diagnostics || []).map((d) => d.code);
+          assert.ok(
+            codes.includes(expected),
+            `Removing ${name} labelAt should report ${expected}, got ${codes.join(',')}`
+          );
+          return true;
+        },
+        `Removing ${name} labelAt should not repair the pair`
+      );
+    } finally {
+      if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
+      if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+    }
+  }
+});
