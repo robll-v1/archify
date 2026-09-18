@@ -10,11 +10,11 @@ import { brandLabelFitWidth, brandMetadataFor, brandTopRailProblem, renderBrandM
 import { minimumReadableSourceTextPx } from '../shared/desktop-readability.mjs';
 import { translateMessage as i18nText } from '../shared/i18n.mjs';
 import { gridLayout, resolveComponentPos, validateGridPlacement } from './grid.mjs';
+import { createRouter } from './routing.mjs';
 import {
   asArray,
   isFinitePoint,
   rectsOverlap,
-  segmentIntersectsRect,
   cleanEndpointSideProblems,
   cleanFlowProblems,
   cleanCrossingProblems,
@@ -22,24 +22,18 @@ import {
   cleanBorderRunProblems,
   cleanRouteRhythmProblems,
   cleanLabelRouteClearanceProblems,
+  cleanLabelCanvasContainmentProblems,
   suggestLabelObstacleFix,
   suggestComponentSeparation,
-  anchor,
-  automaticPortSpread,
-  automaticPortRhythmBridge,
-  defaultFromSide,
-  defaultToSide,
-  chosenSide,
-  routeHonorsEndpointSides,
-  normalizeRoutePoints,
   polylinePath,
   routePointsValue,
-  roundedPath,
+  authoredStraightRouteAttrs,
   labelPoint,
   componentFill,
   componentText,
   arrowClassMap,
-  variantAccent,
+  edgeLabelAccent,
+  normalizeRoutePoints,
   qualityProfileForGate,
 } from '../shared/geometry.mjs';
 
@@ -149,16 +143,39 @@ const architectureLegendEntries = resolveLegend(
   new Set([...components.values()].map((component) => component.type)),
 );
 
-function autoViewBoxFor(candidateBoundaries) {
+// One source for connection label geometry: the rect the containment rule
+// measures is the rect the SVG mask draws, the auto canvas covers, the legend
+// avoids, and the layout report publishes.
+function connectionLabelBox(conn) {
+  if (!conn.label) return null;
+  const [lx, ly] = labelPoint(conn, pathFor(conn).points);
+  const width = Math.max(30, textUnits(conn.label) * 4.8 + 10);
+  return { x: lx - width / 2, y: ly - 10, width, height: 14, lx, ly };
+}
+
+function connectionLabelRects() {
+  const rects = [];
+  for (const [relationIndex, conn] of asArray(arch.connections).entries()) {
+    if (!components.has(conn.from) || !components.has(conn.to)) continue;
+    const box = connectionLabelBox(conn);
+    if (!box) continue;
+    rects.push({ relation: conn, relationIndex, label: conn.label, ...box });
+  }
+  return rects;
+}
+
+function autoViewBoxFor(candidateBoundaries, extraRects = []) {
   const maxX = Math.max(
     0,
     ...[...components.values()].map((component) => component.x + component.width),
     ...candidateBoundaries.map((boundary) => boundary.x + boundary.width),
+    ...extraRects.map((rect) => rect.x + rect.width),
   );
   const maxY = Math.max(
     0,
     ...[...components.values()].map((component) => component.y + component.height),
     ...candidateBoundaries.map((boundary) => boundary.y + boundary.height),
+    ...extraRects.map((rect) => rect.y + rect.height),
   );
   let width = Math.ceil(maxX + layout.margin);
   let footprint = legendFootprint(architectureLegendEntries, {
@@ -180,7 +197,7 @@ function resolvedViewBoxWidth(candidateBoundaries) {
   if (Array.isArray(arch.meta?.viewBox) && Number.isFinite(arch.meta.viewBox[0])) {
     return arch.meta.viewBox[0];
   }
-  return autoViewBoxFor(candidateBoundaries)[0];
+  return autoViewBoxFor(candidateBoundaries, connectionLabels)[0];
 }
 
 function expandBoundaryForReadableTitle(boundary, minimumFontSize) {
@@ -277,6 +294,17 @@ function layoutBoundaryTitles(rawBoundaries, minimumFontSize) {
   });
 }
 
+// ---- Routing state ----------------------------------------------------------
+// Initialized before the boundary-title work below: connection label rects are
+// part of the derived canvas, so the title convergence must measure the same
+// width the diagram actually renders into (a title sized for a narrower canvas
+// would fall below the desktop-readability floor once labels grow it). Routing
+// reads only components and connections, never boundaries or the viewBox.
+const { pathFor, connectionSides, connectionEndpointSide } = createRouter(components, arch.connections);
+// The auto canvas has to cover these rects; an authored viewBox is never
+// resized to fit them — there the containment rule reports the clipping.
+const connectionLabels = connectionLabelRects();
+
 const rawBoundaries = asArray(arch.boundaries).map(boundaryRect).filter(Boolean);
 function resolveBoundaryTitles() {
   if (!enforcesBoundaryTitleComposition || rawBoundaries.length === 0) {
@@ -331,7 +359,10 @@ function componentContext(component) {
 }
 
 // ---- Auto viewBox: fit all geometry + the measured resolved legend ----------
-const viewBox = arch.meta?.viewBox || autoViewBoxFor(boundaries);
+// Connection labels are diagram content, so an auto canvas that stopped at the
+// component/boundary bbox would clip them; the label rects join the fit here
+// and in the title convergence above, which sizes fonts for this same width.
+const viewBox = arch.meta?.viewBox || autoViewBoxFor(boundaries, connectionLabels);
 const legendY = () => viewBox[1] - 16;
 
 // ---- Validation: mechanical correctness, never layout taste -----------------
@@ -565,17 +596,11 @@ function validateArchitecture() {
   }));
 
   // Connection labels must not land on top of components.
-  const labelRects = [];
-  for (const [connectionIndex, conn] of asArray(arch.connections).entries()) {
-    if (!conn.label || !components.has(conn.from) || !components.has(conn.to)) continue;
-    const [lx, ly] = labelPoint(conn, pathFor(conn).points);
-    const w = Math.max(30, textUnits(conn.label) * 4.8 + 10);
-    labelRects.push({ relation: conn, relationIndex: connectionIndex, label: conn.label, x: lx - w / 2, y: ly - 10, width: w, height: 14, lx, ly });
-  }
+  const labelRects = connectionLabels;
   for (const rect of labelRects) {
     for (const c of components.values()) {
       if (rectsOverlap(rect, c, -2)) {
-        problems.push(`Label "${rect.label}" overlaps component "${c.id}" — adjust labelDx/labelDy/labelSegment or set labelAt.\n${suggestLabelObstacleFix(rect, rect.lx, rect.ly, c)}`);
+        problems.push(`Label "${rect.label}" overlaps component "${c.id}" — adjust labelDx/labelDy/labelSegment or set labelAt.\n${suggestLabelObstacleFix(rect, rect.lx, rect.ly, c, 'component', viewBox, components.values())}`);
       }
     }
     if (enforcesBoundaryTitleComposition) {
@@ -596,16 +621,27 @@ function validateArchitecture() {
     relationCollection: 'connections',
     profile: arch.meta?.quality_profile,
   }));
+  // See collectLabelCanvasOverflow in shared/geometry.mjs. An auto canvas now
+  // covers these rects, so this reports authored viewBoxes and the origin side,
+  // which growth cannot reach.
+  problems.push(...cleanLabelCanvasContainmentProblems({
+    labels: labelRects,
+    viewBox,
+    diagramType: 'architecture',
+    relationCollection: 'connections',
+    profile: arch.meta?.quality_profile,
+  }));
 
-  // Detect coincident routes (Issue #248)
-  problems.push(...detectCoincidentRoutes({
+  // Detect coincident routes (Issue #248). This is warning-first: a shared
+  // bidirectional line can be intentional when its labels make direction clear.
+  detectCoincidentRoutes({
     relations: arch.connections,
     endpointIds: new Set(components.keys()),
     pathFor,
     diagramType: 'architecture',
     relationCollection: 'connections',
     profile: arch.meta?.quality_profile,
-  }));
+  });
 
   if (problems.length) {
     throwDiagnosticProblems('Architecture layout validation failed', problems, {
@@ -615,20 +651,14 @@ function validateArchitecture() {
 }
 
 function buildLayoutReport() {
-  const labels = [];
-  for (const conn of asArray(arch.connections)) {
-    if (!conn.label || !components.has(conn.from) || !components.has(conn.to)) continue;
-    const [lx, ly] = labelPoint(conn, pathFor(conn).points);
-    const w = Math.max(30, textUnits(conn.label) * 4.8 + 10);
-    labels.push({
-      text: conn.label,
-      x: Math.round(lx - w / 2),
-      y: Math.round(ly - 10),
-      width: Math.round(w),
-      height: 14,
-      labelAt: [Math.round(lx), Math.round(ly)],
-    });
-  }
+  const labels = connectionLabels.map((rect) => ({
+    text: rect.label,
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: 14,
+    labelAt: [Math.round(rect.lx), Math.round(rect.ly)],
+  }));
   return {
     ok: true,
     diagram_type: 'architecture',
@@ -647,276 +677,11 @@ function buildLayoutReport() {
   };
 }
 
-// ---- Connection routing ------------------------------------------------------
-function routeClearsComponents(conn, points, clearance = 2) {
-  const endpointIds = new Set([conn.from, conn.to]);
-  for (const component of components.values()) {
-    if (endpointIds.has(component.id)) continue;
-    for (let index = 0; index < points.length - 1; index += 1) {
-      if (segmentIntersectsRect({ start: points[index], end: points[index + 1] }, component, clearance)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function routeClearsEndpointComponents(points, from, to) {
-  const lastSegment = points.length - 2;
-  for (let index = 0; index <= lastSegment; index += 1) {
-    const segment = { start: points[index], end: points[index + 1] };
-    if (index > 0 && segmentIntersectsRect(segment, from)) return false;
-    if (index < lastSegment && segmentIntersectsRect(segment, to)) return false;
-  }
-  return true;
-}
-
-const OUTWARD_SIDE_VECTOR = {
-  left: [-1, 0],
-  right: [1, 0],
-  top: [0, -1],
-  bottom: [0, 1],
-};
-
-function outwardStub(point, side, distance = 24) {
-  const [dx, dy] = OUTWARD_SIDE_VECTOR[side] || [0, 0];
-  return [point[0] + dx * distance, point[1] + dy * distance];
-}
-
-function collinearBacktrack(a, b, c) {
-  const first = [b[0] - a[0], b[1] - a[1]];
-  const second = [c[0] - b[0], c[1] - b[1]];
-  const cross = first[0] * second[1] - first[1] * second[0];
-  const dot = first[0] * second[0] + first[1] * second[1];
-  return Math.abs(cross) <= 0.0001 && dot < -0.0001;
-}
-
-function sideAwareBridgeCandidates(start, end, fromSide, toSide) {
-  const startStub = outwardStub(start, fromSide);
-  const endStub = outwardStub(end, toSide);
-  const rawCandidates = [];
-  const minimumBridge = 16;
-  const verticalSides = new Set(['top', 'bottom']);
-  const horizontalSides = new Set(['left', 'right']);
-
-  // Port spreading can leave parallel-side anchors only a few pixels apart.
-  // Route through a bounded outside channel so we keep both endpoint normals
-  // without introducing a tiny, noisy connector between the two stubs.
-  if (verticalSides.has(fromSide) && verticalSides.has(toSide)
-      && Math.abs(start[0] - end[0]) < minimumBridge) {
-    for (const channelX of [
-      Math.max(start[0], end[0]) + minimumBridge,
-      Math.min(start[0], end[0]) - minimumBridge,
-    ]) {
-      rawCandidates.push([
-        startStub,
-        [channelX, startStub[1]],
-        [channelX, endStub[1]],
-        endStub,
-      ]);
-    }
-  }
-  if (horizontalSides.has(fromSide) && horizontalSides.has(toSide)
-      && Math.abs(start[1] - end[1]) < minimumBridge) {
-    for (const channelY of [
-      Math.max(start[1], end[1]) + minimumBridge,
-      Math.min(start[1], end[1]) - minimumBridge,
-    ]) {
-      rawCandidates.push([
-        startStub,
-        [startStub[0], channelY],
-        [endStub[0], channelY],
-        endStub,
-      ]);
-    }
-  }
-
-  rawCandidates.push(
-    [startStub, [endStub[0], startStub[1]], endStub],
-    [startStub, [startStub[0], endStub[1]], endStub],
-  );
-  return rawCandidates.map((candidate) => normalizeRoutePoints([start, ...candidate, end]))
-    .filter((points) => points.length >= 2)
-    .filter((points) => !collinearBacktrack(points[0], points[1], points[2] || points[1]))
-    .filter((points) => !collinearBacktrack(points.at(-3) || points.at(-2), points.at(-2), points.at(-1)))
-    .filter((points) => routeHonorsEndpointSides(points, fromSide, toSide))
-    .map((points) => points.slice(1, -1));
-}
-
-const AUTOMATIC_PORT_CORNER_GUTTER = 16;
-const AUTOMATIC_PORT_ALIGNMENT_DELTA = 16;
-
-function portHasCornerClearance(rect, side, point) {
-  if (side === 'left' || side === 'right') {
-    const inset = Math.min(AUTOMATIC_PORT_CORNER_GUTTER, rect.height / 2);
-    return point[1] >= rect.y + inset && point[1] <= rect.y + rect.height - inset;
-  }
-  if (side === 'top' || side === 'bottom') {
-    const inset = Math.min(AUTOMATIC_PORT_CORNER_GUTTER, rect.width / 2);
-    return point[0] >= rect.x + inset && point[0] <= rect.x + rect.width - inset;
-  }
-  return false;
-}
-
-function alignFacingPorts(conn, from, to, start, end, fromSide, toSide, ports) {
-  const hasExplicitGeometry = (
-    conn.via
-    || (conn.route && conn.route !== 'auto')
-    || conn.channelX !== undefined
-    || conn.channelY !== undefined
-    || conn.labelAt
-  );
-  const horizontallyFacing = (
-    (fromSide === 'right' && toSide === 'left')
-    || (fromSide === 'left' && toSide === 'right')
-  );
-  const verticallyFacing = (
-    (fromSide === 'bottom' && toSide === 'top')
-    || (fromSide === 'top' && toSide === 'bottom')
-  );
-  if (hasExplicitGeometry || (!horizontallyFacing && !verticallyFacing)) return { start, end };
-
-  const fromSpread = Boolean(ports?.from);
-  const toSpread = Boolean(ports?.to);
-  if (fromSpread && toSpread) return { start, end };
-  const hasExplicitSides = (
-    (conn.fromSide && conn.fromSide !== 'auto')
-    || (conn.toSide && conn.toSide !== 'auto')
-  );
-  if (!fromSpread && !toSpread && hasExplicitSides) return { start, end };
-
-  const alignmentDelta = horizontallyFacing
-    ? Math.abs(start[1] - end[1])
-    : Math.abs(start[0] - end[0]);
-  if (alignmentDelta >= AUTOMATIC_PORT_ALIGNMENT_DELTA) return { start, end };
-
-  // Keep the shared endpoint's distinct spread slot and move only the
-  // relationship's unshared endpoint onto that axis. With no spread endpoint,
-  // retain the existing least-movement choice between the two facing sides.
-  // If both endpoints are shared, preserve the outside bridge so no competing
-  // port is silently collapsed.
-  const alignEndToStart = horizontallyFacing
-    ? { start, end: [end[0], start[1]] }
-    : { start, end: [start[0], end[1]] };
-  const alignStartToEnd = horizontallyFacing
-    ? { start: [start[0], end[1]], end }
-    : { start: [end[0], start[1]], end };
-  const candidates = fromSpread
-    ? [alignEndToStart]
-    : toSpread
-      ? [alignStartToEnd]
-      : [alignEndToStart, alignStartToEnd];
-  for (const candidate of candidates) {
-    const points = [candidate.start, candidate.end];
-    if (portHasCornerClearance(from, fromSide, candidate.start)
-        && portHasCornerClearance(to, toSide, candidate.end)
-        && routeHonorsEndpointSides(points, fromSide, toSide)
-        && routeClearsEndpointComponents(points, from, to)
-        && routeClearsComponents(conn, points)) {
-      return candidate;
-    }
-  }
-  return { start, end };
-}
-
-function routeVia(conn, from, to, start, end, fromSide, toSide) {
-  if (conn.via) return conn.via;
-  switch (conn.route || 'auto') {
-    case 'straight':
-      return [];
-    case 'orthogonal-h': {
-      const midX = (start[0] + end[0]) / 2;
-      return [[midX, start[1]], [midX, end[1]]];
-    }
-    case 'orthogonal-v': {
-      const midY = (start[1] + end[1]) / 2;
-      return [[start[0], midY], [end[0], midY]];
-    }
-    case 'auto':
-    default: {
-      // Direct line unless the anchors are clearly orthogonal-friendly.
-      const deltaX = Math.abs(start[0] - end[0]);
-      const deltaY = Math.abs(start[1] - end[1]);
-      if ((deltaX < 4 || deltaY < 4) && routeHonorsEndpointSides([start, end], fromSide, toSide)) return [];
-
-      const rhythmBridge = automaticPortRhythmBridge(start, end, fromSide, toSide, {
-        accept: (points) => (
-          routeClearsEndpointComponents(points, from, to)
-          && routeClearsComponents(conn, points)
-        ),
-      });
-      if (rhythmBridge) return rhythmBridge.slice(1, -1);
-
-      // Automatic port spreading can leave otherwise aligned endpoints only a
-      // few pixels apart. A midpoint route would split that tiny difference
-      // into two unreadable endpoint stubs, so take a bounded outside channel
-      // when both anchors sit on parallel component sides.
-      const minimumStub = 8;
-      const fromVerticalSide = start[1] === from.y || start[1] === from.y + from.height;
-      const toVerticalSide = end[1] === to.y || end[1] === to.y + to.height;
-      if (fromVerticalSide && toVerticalSide && deltaX < minimumStub * 2) {
-        const outsideChannels = [
-          Math.max(start[0], end[0]) + minimumStub * 2,
-          Math.min(start[0], end[0]) - minimumStub * 2,
-        ];
-        for (const channelX of outsideChannels) {
-          const candidate = [[channelX, start[1]], [channelX, end[1]]];
-          const points = [start, ...candidate, end];
-          if (routeHonorsEndpointSides(points, fromSide, toSide) && routeClearsComponents(conn, points)) return candidate;
-        }
-      }
-
-      const fromHorizontalSide = start[0] === from.x || start[0] === from.x + from.width;
-      const toHorizontalSide = end[0] === to.x || end[0] === to.x + to.width;
-      if (fromHorizontalSide && toHorizontalSide && deltaY < minimumStub * 2) {
-        const outsideChannels = [
-          Math.max(start[1], end[1]) + minimumStub * 2,
-          Math.min(start[1], end[1]) - minimumStub * 2,
-        ];
-        for (const channelY of outsideChannels) {
-          const candidate = [[start[0], channelY], [end[0], channelY]];
-          const points = [start, ...candidate, end];
-          if (routeHonorsEndpointSides(points, fromSide, toSide) && routeClearsComponents(conn, points)) return candidate;
-        }
-      }
-
-      const midX = (start[0] + end[0]) / 2;
-      const horizontalFirst = [[midX, start[1]], [midX, end[1]]];
-      const midY = (start[1] + end[1]) / 2;
-      const verticalFirst = [[start[0], midY], [end[0], midY]];
-      const candidates = [horizontalFirst, verticalFirst];
-      const sideSafe = candidates.filter((candidate) => (
-        routeHonorsEndpointSides([start, ...candidate, end], fromSide, toSide)
-      ));
-      const sideAware = sideAwareBridgeCandidates(start, end, fromSide, toSide);
-      const nearParallelPorts = (
-        ((fromSide === 'top' || fromSide === 'bottom')
-          && (toSide === 'top' || toSide === 'bottom')
-          && deltaX < minimumStub * 2)
-        || ((fromSide === 'left' || fromSide === 'right')
-          && (toSide === 'left' || toSide === 'right')
-          && deltaY < minimumStub * 2)
-      );
-      const ordered = [
-        ...(nearParallelPorts ? sideAware : sideSafe),
-        ...(nearParallelPorts ? sideSafe : sideAware),
-        ...candidates.filter((candidate) => !sideSafe.includes(candidate)),
-      ];
-      for (const candidate of ordered) {
-        const points = [start, ...candidate, end];
-        if (routeClearsEndpointComponents(points, from, to) && routeClearsComponents(conn, points)) return candidate;
-      }
-
-      // Both bounded doglegs are blocked. Keep the best endpoint-safe route
-      // when one exists so the universal Clean Flow gate reports the actual
-      // obstacle; otherwise preserve the historical deterministic fallback
-      // and let the endpoint-direction gate explain the side mismatch.
-      return sideSafe[0] || sideAware[0] || horizontalFirst;
-    }
-  }
-}
-
 // ---- Coincident route detection (Issue #248) --------------------------------
+// Keys on the measured route, not on authoring fields: two relationships whose
+// normalized polylines coincide are indistinguishable to a reader no matter how
+// they were authored, while explicit geometry that separates them passes even
+// when both edges carry labelAt.
 function detectCoincidentRoutes({ relations, endpointIds, pathFor, diagramType, relationCollection, profile }) {
   if (qualityProfileForGate(profile) !== 'showcase') return [];
 
@@ -924,131 +689,68 @@ function detectCoincidentRoutes({ relations, endpointIds, pathFor, diagramType, 
   const routes = new Map(); // key: normalized route string, value: { conn, index, points }
 
   for (const [index, conn] of asArray(relations).entries()) {
-    // Skip invalid connections
     if (!conn || typeof conn.from !== 'string' || typeof conn.to !== 'string') continue;
     if (!endpointIds.has(conn.from) || !endpointIds.has(conn.to)) continue;
 
-    const routed = pathFor(conn);
-    const points = routed?.points;
-    if (!Array.isArray(points) || points.length < 2) continue;
+    const points = normalizeRoutePoints(pathFor(conn)?.points);
+    if (points.length < 2) continue;
 
-    // Normalize route to be direction-agnostic using numeric endpoint comparison
-    const first = points[0];
-    const last = points[points.length - 1];
-
-    // Determine canonical direction by comparing endpoints numerically
-    // Use first point as primary comparator, then last point as tiebreaker
-    let useForward;
-    if (first[0] !== last[0]) {
-      useForward = first[0] < last[0];
-    } else if (first[1] !== last[1]) {
-      useForward = first[1] < last[1];
-    } else {
-      // Endpoints have same coordinates (shouldn't happen for valid routes)
-      useForward = true;
-    }
-
-    const pointsStr = points.map(p => `${p[0]},${p[1]}`).join(';');
-    const reverseStr = [...points].reverse().map(p => `${p[0]},${p[1]}`).join(';');
-    const normalized = useForward ? pointsStr : reverseStr;
+    const pointsStr = points.map((p) => `${p[0]},${p[1]}`).join(';');
+    const reverseStr = [...points].reverse().map((p) => `${p[0]},${p[1]}`).join(';');
+    const normalized = pointsStr < reverseStr ? pointsStr : reverseStr;
 
     if (routes.has(normalized)) {
       const existing = routes.get(normalized);
+      if (existing.index === index) continue;
 
-      // Check if this is actually a different connection (not the same one)
-      if (existing.index !== index) {
-        // Both routes normalized to the same key. If original directions differ, they're anti-parallel.
-        const existingPointsStr = existing.points.map(p => `${p[0]},${p[1]}`).join(';');
-        const isAntiParallel = (pointsStr !== existingPointsStr);
-        const direction = isAntiParallel ? 'opposite directions' : 'same direction';
+      // Authored endpoints, not the rendered polyline, decide the direction:
+      // normalizing the geometry would otherwise report the same pair as
+      // anti-parallel or same-direction depending on authoring order.
+      const sameAuthoredDirection = conn.from === existing.conn.from && conn.to === existing.conn.to;
+      const direction = sameAuthoredDirection ? 'same direction' : 'opposite directions';
 
-        const connId = conn.id ? ` id "${conn.id}"` : '';
-        const existingId = existing.conn.id ? ` id "${existing.conn.id}"` : '';
+      const connId = conn.id ? ` id "${conn.id}"` : '';
+      const existingId = existing.conn.id ? ` id "${existing.conn.id}"` : '';
 
-        const message = `[composition/coincident-routes] showcase ${diagramType} ${relationCollection}[${index}]${connId} "${conn.from}" -> "${conn.to}" has identical geometry to ${relationCollection}[${existing.index}]${existingId} "${existing.conn.from}" -> "${existing.conn.to}" (${direction}) — readers cannot distinguish the connections. Add explicit via points, use channelX/channelY offset, or adjust fromSide/toSide to separate routes.`;
+      const message = `[composition/coincident-routes] showcase ${diagramType} ${relationCollection}[${index}]${connId} "${conn.from}" -> "${conn.to}" has identical geometry to ${relationCollection}[${existing.index}]${existingId} "${existing.conn.from}" -> "${existing.conn.to}" (${direction}) — readers cannot distinguish the connections. Add explicit via points, use channelX/channelY offset, or adjust fromSide/toSide to separate routes.`;
 
-        // Build evidence with actual endpoint comparison
-        const bothHaveLabelAt = (conn.labelAt !== undefined && existing.conn.labelAt !== undefined);
-
-        recordDiagnostic({
-          code: 'composition/coincident-routes',
-          severity: 'error',
-          message,
-          subject: {
-            diagramType,
-            collection: relationCollection,
-            index,
-            from: conn.from,
-            to: conn.to,
-            id: conn.id,
+      recordDiagnostic({
+        code: 'composition/coincident-routes',
+        severity: 'warning',
+        message,
+        subject: {
+          diagramType,
+          collection: relationCollection,
+          index,
+          from: conn.from,
+          to: conn.to,
+          id: conn.id,
+        },
+        evidence: {
+          coincidentWith: {
+            index: existing.index,
+            from: existing.conn.from,
+            to: existing.conn.to,
+            id: existing.conn.id,
           },
-          evidence: {
-            coincidentWith: {
-              index: existing.index,
-              from: existing.conn.from,
-              to: existing.conn.to,
-              id: existing.conn.id,
-            },
-            sharedPoints: normalized,
-            antiParallel: isAntiParallel,
-            reason: bothHaveLabelAt ? 'both-have-labelAt' : 'route-coincidence',
-          },
-          supportedFixes: [
-            'add explicit via points to separate routes',
-            'use channelX or channelY offset to separate routes',
-            'adjust fromSide/toSide to create distinct paths',
-          ],
-        });
+          sharedPoints: normalized,
+          antiParallel: !sameAuthoredDirection,
+        },
+        supportedFixes: [
+          'add explicit via points to separate routes',
+          'use channelX or channelY offset to separate routes',
+          'adjust fromSide/toSide to create distinct paths',
+        ],
+      });
 
-        problems.push(message);
-      }
+      // The final artifact checker includes this warning in the public receipt;
+      // renderer validation must remain successful for intentional shared lines.
     } else {
       routes.set(normalized, { conn, index, points });
     }
   }
 
   return problems;
-}
-
-const pathCache = new Map();
-const automaticPorts = automaticPortSpread(arch.connections, components);
-function connectionSides(conn) {
-  const from = components.get(conn.from);
-  const to = components.get(conn.to);
-  return {
-    fromSide: chosenSide(conn.fromSide, defaultFromSide(from, to)),
-    toSide: chosenSide(conn.toSide, defaultToSide(from, to)),
-  };
-}
-
-function connectionEndpointSide(conn, endpoint) {
-  const field = endpoint === 'source' ? 'fromSide' : 'toSide';
-  if (conn[field] && conn[field] !== 'auto') return conn[field];
-  return connectionSides(conn)[field];
-}
-
-function pathFor(conn) {
-  if (pathCache.has(conn)) return pathCache.get(conn);
-  const from = components.get(conn.from);
-  const to = components.get(conn.to);
-  const ports = automaticPorts.get(conn);
-  const { fromSide, toSide } = connectionSides(conn);
-  const baseStart = ports?.from || anchor(from, fromSide);
-  const baseEnd = ports?.to || anchor(to, toSide);
-  const { start, end } = alignFacingPorts(
-    conn,
-    from,
-    to,
-    baseStart,
-    baseEnd,
-    fromSide,
-    toSide,
-    ports,
-  );
-  const points = [start, ...routeVia(conn, from, to, start, end, fromSide, toSide), end];
-  const routed = { d: roundedPath(points, 8), points };
-  pathCache.set(conn, routed);
-  return routed;
 }
 
 // ---- Rendering ---------------------------------------------------------------
@@ -1070,16 +772,15 @@ function renderConnectionPath(conn, index) {
   const [cls, marker] = arrowClassMap[conn.variant || 'default'] || arrowClassMap.default;
   const routed = pathFor(conn);
   const strokeWidth = conn.width || (conn.variant === 'emphasis' ? 1.8 : 1.5);
-  return `        <path ${focusEdgeAttrs(conn.from, conn.to, conn.label, index, conn.id)} data-composition-points="${routePointsValue(routed.points)}" d="${routed.d}" class="${cls}"${animateAttr(arch.meta, 'edge', index)} stroke-width="${strokeWidth}" marker-end="url(#${marker})"/>`;
+  return `        <path ${focusEdgeAttrs(conn.from, conn.to, conn.label, index, conn.id)} data-composition-points="${routePointsValue(routed.points)}"${authoredStraightRouteAttrs(conn, routed.points)} d="${routed.d}" class="${cls}"${animateAttr(arch.meta, 'edge', index)} stroke-width="${strokeWidth}" marker-end="url(#${marker})"/>`;
 }
 
 function renderConnectionLabel(conn, index) {
-  if (!conn.label) return '';
-  const [lx, ly] = labelPoint(conn, pathFor(conn).points);
-  const w = Math.max(30, textUnits(conn.label) * 4.8 + 10);
+  const box = connectionLabelBox(conn);
+  if (!box) return '';
   return `        <g data-detail="context" ${focusEdgeAttrs(conn.from, conn.to, conn.label, index, conn.id)}>
-          <rect x="${lx - w / 2}" y="${ly - 10}" width="${w}" height="14" rx="3" class="c-mask"/>
-          <text x="${lx}" y="${ly}" class="${variantAccent(conn.variant)}" font-size="8" text-anchor="middle">${esc(conn.label)}</text>
+          <rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="3" class="c-mask"/>
+          <text x="${box.lx}" y="${box.ly}" class="${edgeLabelAccent(conn.variant)}" font-size="8" text-anchor="middle">${esc(conn.label)}</text>
         </g>`;
 }
 
@@ -1111,12 +812,7 @@ function renderLegend() {
   const entries = architectureLegendEntries;
   const relationshipObstacles = relationshipLegendObstacles(arch.connections, {
     pointsFor: (connection) => pathFor(connection).points,
-    labelRectFor: (connection) => {
-      if (!connection.label) return null;
-      const [x, y] = labelPoint(connection, pathFor(connection).points);
-      const width = Math.max(30, textUnits(connection.label) * 4.8 + 10);
-      return { x: x - width / 2, y: y - 10, width, height: 14 };
-    },
+    labelRectFor: connectionLabelBox,
   });
   const contentBottom = Math.max(
     0,

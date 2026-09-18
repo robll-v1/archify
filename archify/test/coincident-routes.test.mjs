@@ -1,16 +1,18 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const archifyBin = path.join(__dirname, '..', 'bin', 'archify.mjs');
+const archifyBin = fileURLToPath(new URL('../bin/archify.mjs', import.meta.url));
+const __dirname = fs.mkdtempSync(path.join(os.tmpdir(), 'archify-coincident-'));
+after(() => fs.rmSync(__dirname, { recursive: true, force: true }));
 
-test('anti-parallel connections with labelAt fail showcase composition', async () => {
+test('anti-parallel connections with labelAt warn in showcase composition', async () => {
   const json = {
     schema_version: 1,
     diagram_type: 'architecture',
@@ -35,20 +37,14 @@ test('anti-parallel connections with labelAt fail showcase composition', async (
   try {
     fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
 
-    // Should throw due to coincident routes
-    await assert.rejects(
-      async () => {
-        await execAsync(
-          `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
-        );
-      },
-      (err) => {
-        const output = err.stdout || err.stderr || err.message;
-        return output.includes('composition/coincident-routes') &&
-               output.includes('identical geometry');
-      },
-      'Should reject anti-parallel connections with labelAt'
+    const { stdout } = await execAsync(
+      `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
     );
+    const result = JSON.parse(stdout);
+    assert.equal(result.ok, true);
+    assert.equal(result.validation.compositionStatus, 'pass');
+    assert.equal(result.validation.errors, 0);
+    assert.ok(result.validation.warnings >= 1);
   } finally {
     if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
     if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
@@ -114,7 +110,7 @@ test('anti-parallel connections without labelAt hit label clearance (known limit
   }
 });
 
-test('same-direction connections with labelAt are detected if coincident', async () => {
+test('same-direction connections with labelAt warn if coincident', async () => {
   const json = {
     schema_version: 1,
     diagram_type: 'architecture',
@@ -140,17 +136,14 @@ test('same-direction connections with labelAt are detected if coincident', async
     fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
 
     await assert.rejects(
-      async () => {
-        await execAsync(
-          `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
-        );
+      execAsync(`node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`),
+      (error) => {
+        const result = JSON.parse(error.stdout);
+        assert.equal(result.ok, false);
+        assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === 'composition/label-route-clearance'));
+        assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === 'composition/coincident-routes' && diagnostic.severity === 'warning'));
+        return true;
       },
-      (err) => {
-        const output = err.stdout || err.stderr || err.message;
-        return output.includes('composition/coincident-routes') &&
-               output.includes('same direction');
-      },
-      'Should reject same-direction connections with coincident routes'
     );
   } finally {
     if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
@@ -196,7 +189,7 @@ test('non-showcase quality does not enforce coincident route check', async () =>
   }
 });
 
-test('CLI --quality showcase override detects coincident routes even without source quality_profile', async () => {
+test('CLI --quality showcase override reports coincident routes even without source quality_profile', async () => {
   // Regression test for PR review: ensure CLI override works
   const json = {
     schema_version: 1,
@@ -222,33 +215,20 @@ test('CLI --quality showcase override detects coincident routes even without sou
   try {
     fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
 
-    // Should fail with --quality showcase even though source has no quality_profile
-    await assert.rejects(
-      async () => {
-        await execAsync(
-          `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
-        );
-      },
-      (err) => {
-        const result = JSON.parse(err.stdout);
-        assert.equal(result.ok, false, 'Should fail validation');
-        const hasCoincidentDiagnostic = result.diagnostics?.some(
-          (d) => d.code === 'composition/coincident-routes'
-        );
-        assert.ok(hasCoincidentDiagnostic, 'Should have coincident-routes diagnostic');
-        return true;
-      },
-      'Should reject coincident routes with CLI --quality showcase override'
+    const { stdout } = await execAsync(
+      `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
     );
+    const result = JSON.parse(stdout);
+    assert.equal(result.ok, true);
+    assert.equal(result.validation.compositionProfile, 'showcase');
+    assert.ok(result.validation.warnings >= 1);
   } finally {
     if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
     if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
   }
 });
 
-test('numeric coordinate normalization handles lexicographic edge cases', async () => {
-  // Regression test: coordinates like [50,300] vs [100,200] where lexicographic
-  // string comparison "100,200" < "50,300" would fail to detect coincidence
+test('canonical route keys detect reversed geometry regardless of coordinate digit count', async () => {
   const json = {
     schema_version: 1,
     diagram_type: 'architecture',
@@ -262,8 +242,6 @@ test('numeric coordinate normalization handles lexicographic edge cases', async 
       { id: 'b', type: 'backend', label: 'Node B', pos: [200, 170], size: [80, 62] },
     ],
     connections: [
-      // These routes have coordinates where lexicographic comparison would fail:
-      // Route goes [50,201] -> [200,201] vs [200,201] -> [50,201]
       { id: 'fwd', from: 'a', to: 'b', label: 'forward', labelAt: [125, 180] },
       { id: 'rev', from: 'b', to: 'a', label: 'reverse', labelAt: [125, 220] },
     ],
@@ -290,13 +268,46 @@ test('numeric coordinate normalization handles lexicographic edge cases', async 
         assert.ok(hasCoincidentDiagnostic, 'Should detect anti-parallel coincident routes with numeric normalization');
         return true;
       },
-      'Should detect coincidence even when lexicographic string comparison would fail'
+      'Should detect coincidence regardless of coordinate digit count'
     );
   } finally {
     if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
     if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
   }
 });
+
+for (const reverseOrder of [false, true]) {
+  test(`redundant collinear via preserves coincidence and direction (reverse order: ${reverseOrder})`, async () => {
+    const connections = [
+      { id: 'reads', from: 'graph', to: 'engine', label: 'lists', labelAt: [355, 150] },
+      { id: 'declares', from: 'engine', to: 'graph', label: 'declares', via: [[355, 201]], labelAt: [355, 260] },
+    ];
+    if (reverseOrder) connections.reverse();
+    const input = path.join(__dirname, `collinear-${reverseOrder}.json`);
+    fs.writeFileSync(input, JSON.stringify({
+      schema_version: 1,
+      diagram_type: 'architecture',
+      meta: { title: 'Collinear coincidence', viewBox: [900, 420] },
+      components: [
+        { id: 'graph', type: 'backend', label: 'the graph', pos: [80, 170], size: [200, 62] },
+        { id: 'engine', type: 'backend', label: 'the engine', pos: [430, 170], size: [200, 62] },
+      ],
+      connections,
+    }));
+    const { stdout } = await execAsync(
+      `node "${archifyBin}" validate architecture "${input}" --quality showcase --json`
+    );
+    const receipt = JSON.parse(stdout);
+    assert.equal(receipt.ok, true);
+    const diagnostic = receipt.composition.issues.find((entry) => entry.code === 'composition/coincident-routes');
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.severity, 'warning');
+    assert.equal(diagnostic.antiParallel, true);
+    assert.equal(diagnostic.relationship.id, connections[1].id);
+    assert.equal(diagnostic.otherRelationship.id, connections[0].id);
+    assert.equal(diagnostic.sharedPoints, '280,201;430,201');
+  });
+}
 
 test('explicit via geometry separates an anti-parallel pair and keeps both labels', async () => {
   // Success regression: the documented repair routes one edge around the pair
@@ -391,24 +402,20 @@ test('removing either labelAt does not repair a coincident anti-parallel pair', 
     try {
       fs.writeFileSync(tempInput, JSON.stringify(json, null, 2));
 
-      await assert.rejects(
-        async () => {
-          await execAsync(
-            `node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`
-          );
-        },
-        (err) => {
-          const result = JSON.parse(err.stdout);
-          assert.equal(result.ok, false, `Removing ${name} labelAt should still fail`);
-          const codes = (result.diagnostics || []).map((d) => d.code);
-          assert.ok(
-            codes.includes(expected),
-            `Removing ${name} labelAt should report ${expected}, got ${codes.join(',')}`
-          );
-          return true;
-        },
-        `Removing ${name} labelAt should not repair the pair`
-      );
+      if (expected === 'composition/coincident-routes') {
+        const { stdout } = await execAsync(
+          `node "${archifyBin}" validate architecture "${tempInput}" --quality showcase --json`
+        );
+        const result = JSON.parse(stdout);
+        assert.equal(result.ok, true);
+        assert.ok(result.composition.issues.some((issue) => issue.code === expected && issue.severity === 'warning'));
+      } else {
+        await assert.rejects(
+          execAsync(`node "${archifyBin}" deliver architecture "${tempInput}" "${tempOutput}" --quality showcase --json`),
+          (err) => JSON.parse(err.stdout).diagnostics.some((diagnostic) => diagnostic.code === expected),
+          `Removing ${name} labelAt should still fail clearance`
+        );
+      }
     } finally {
       if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
       if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
