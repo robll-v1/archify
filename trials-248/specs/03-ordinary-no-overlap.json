@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ordinary request path (no overlap)",
+    "quality_profile": "showcase",
+    "output": "03-ordinary-no-overlap.html"
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Web Client",
+      "sublabel": "browser",
+      "pos": [
+        60,
+        240
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "edge",
+      "type": "cloud",
+      "label": "CDN and WAF",
+      "sublabel": "edge cache",
+      "pos": [
+        300,
+        240
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API",
+      "sublabel": "stateless",
+      "pos": [
+        540,
+        240
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "cache",
+      "type": "database",
+      "label": "Cache",
+      "sublabel": "hot keys",
+      "pos": [
+        540,
+        80
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "Primary DB",
+      "sublabel": "durable",
+      "pos": [
+        540,
+        400
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Worker",
+      "sublabel": "async",
+      "pos": [
+        800,
+        240
+      ],
+      "size": [
+        140,
+        62
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-edge",
+      "from": "client",
+      "to": "edge",
+      "label": "HTTPS",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "edge-api",
+      "from": "edge",
+      "to": "api",
+      "label": "forward",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-cache",
+      "from": "api",
+      "to": "cache",
+      "label": "read",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-db",
+      "from": "api",
+      "to": "db",
+      "label": "write",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api-worker",
+      "from": "api",
+      "to": "worker",
+      "label": "enqueue",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ]
+}

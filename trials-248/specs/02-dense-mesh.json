@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Dense service mesh with several bidirectional pairs",
+    "quality_profile": "showcase",
+    "output": "02-dense-mesh.html"
+  },
+  "components": [
+    {
+      "id": "gateway",
+      "type": "frontend",
+      "label": "API Gateway",
+      "sublabel": "edge",
+      "pos": [
+        60,
+        260
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Auth",
+      "sublabel": "tokens",
+      "pos": [
+        300,
+        80
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "orders",
+      "type": "backend",
+      "label": "Orders",
+      "sublabel": "write path",
+      "pos": [
+        300,
+        260
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "catalog",
+      "type": "backend",
+      "label": "Catalog",
+      "sublabel": "read path",
+      "pos": [
+        300,
+        440
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "payments",
+      "type": "backend",
+      "label": "Payments",
+      "sublabel": "charge",
+      "pos": [
+        560,
+        170
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Ledger",
+      "sublabel": "double entry",
+      "pos": [
+        560,
+        350
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "bus",
+      "type": "messagebus",
+      "label": "Event Bus",
+      "sublabel": "async",
+      "pos": [
+        820,
+        260
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "search",
+      "type": "database",
+      "label": "Search Index",
+      "sublabel": "derived",
+      "pos": [
+        820,
+        80
+      ],
+      "size": [
+        150,
+        62
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "gw-auth-out",
+      "from": "gateway",
+      "to": "auth",
+      "label": "verify",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gw-auth-back",
+      "from": "auth",
+      "to": "gateway",
+      "label": "claims",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "gw-ord-out",
+      "from": "gateway",
+      "to": "orders",
+      "label": "submit",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gw-ord-back",
+      "from": "orders",
+      "to": "gateway",
+      "label": "status",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "gw-cat-out",
+      "from": "gateway",
+      "to": "catalog",
+      "label": "query",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gw-cat-back",
+      "from": "catalog",
+      "to": "gateway",
+      "label": "results",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "ord-pay",
+      "from": "orders",
+      "to": "payments",
+      "label": "authorize",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ord-led",
+      "from": "orders",
+      "to": "ledger",
+      "label": "record",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "pay-led",
+      "from": "payments",
+      "to": "ledger",
+      "label": "settle",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "cat-search",
+      "from": "catalog",
+      "to": "search",
+      "label": "project",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pay-bus",
+      "from": "payments",
+      "to": "bus",
+      "label": "emit",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "bus-search",
+      "from": "bus",
+      "to": "search",
+      "label": "index",
+      "fromSide": "top",
+      "toSide": "right"
+    }
+  ]
+}

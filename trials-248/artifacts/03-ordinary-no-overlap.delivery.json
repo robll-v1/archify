@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "683bed47-4663-4aee-b7a4-e1feb497439c",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/tmp/trials/03-ordinary-no-overlap.json",
+  "output": "/private/tmp/scan2/03-ordinary-no-overlap.html",
+  "specification": {
+    "sha256": "6fc84a3a11745c25fd3846517e2650459fab8afda36453261d549b18ddcf7ffb",
+    "bytes": 2290
+  },
+  "artifact": {
+    "sha256": "f4c9ccfa516e7869e665628be43f675625227f088175dd23d60c46c313a625a0",
+    "bytes": 790661
+  }
+}

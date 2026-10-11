@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "command": "deliver",
+  "status": "pending",
+  "receiptId": "eef579cb-868c-438c-870e-fd227e419d5b",
+  "input": "/tmp/trials/05-prototype-separated.json",
+  "output": "/private/tmp/scan2/05-prototype-separated.html"
+}

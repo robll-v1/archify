@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "141f8184-432d-4216-9d38-78b924fc9972",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/tmp/trials/01-original-ambiguous.json",
+  "output": "/private/tmp/scan2/01-original-ambiguous.html",
+  "specification": {
+    "sha256": "ee6a173f71b4601859957125ecefc513c160e556850cdb194039d0649b042db1",
+    "bytes": 977
+  },
+  "artifact": {
+    "sha256": "357407433319296902464d5c031990aecc7e2b8de77e4a1db66f00c0a1061752",
+    "bytes": 781460
+  }
+}

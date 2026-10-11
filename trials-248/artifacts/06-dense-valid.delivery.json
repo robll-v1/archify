@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b091c935-6aa2-4b60-ae22-a7ac86413a24",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/tmp/trials/06-dense-valid.json",
+  "output": "/private/tmp/scan2/06-dense-valid.html",
+  "specification": {
+    "sha256": "29381b8068afcc3ba36bf42c40221a3de93e97bc81d35ca2c666c57b2772ffc9",
+    "bytes": 3220
+  },
+  "artifact": {
+    "sha256": "fc581286f8b097d28b005e0af650975ee7d147b6e4701c813e8bf3312a83857c",
+    "bytes": 797982
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Dense service mesh",
+    "quality_profile": "showcase",
+    "output": "06-dense-valid.html"
+  },
+  "components": [
+    {
+      "id": "gateway",
+      "type": "frontend",
+      "label": "API Gateway",
+      "sublabel": "edge",
+      "pos": [
+        60,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Auth",
+      "sublabel": "tokens",
+      "pos": [
+        330,
+        100
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "orders",
+      "type": "backend",
+      "label": "Orders",
+      "sublabel": "write path",
+      "pos": [
+        330,
+        300
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "catalog",
+      "type": "backend",
+      "label": "Catalog",
+      "sublabel": "read path",
+      "pos": [
+        330,
+        520
+      ],
+      "size": [
+        130,
+        62
+      ]
+    },
+    {
+      "id": "payments",
+      "type": "backend",
+      "label": "Payments",
+      "sublabel": "charge",
+      "pos": [
+        620,
+        200
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Ledger",
+      "sublabel": "double entry",
+      "pos": [
+        620,
+        420
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "bus",
+      "type": "messagebus",
+      "label": "Event Bus",
+      "sublabel": "async fan-out",
+      "pos": [
+        900,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "search",
+      "type": "database",
+      "label": "Search Index",
+      "sublabel": "derived",
+      "pos": [
+        900,
+        100
+      ],
+      "size": [
+        150,
+        62
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "gw-ord-out",
+      "from": "gateway",
+      "to": "orders",
+      "label": "submit",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ord-gw-back",
+      "from": "orders",
+      "to": "gateway",
+      "label": "status",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "gw-auth",
+      "from": "gateway",
+      "to": "auth",
+      "label": "verify",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gw-cat",
+      "from": "gateway",
+      "to": "catalog",
+      "label": "query",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ord-pay",
+      "from": "orders",
+      "to": "payments",
+      "label": "authorize",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ord-led",
+      "from": "orders",
+      "to": "ledger",
+      "label": "record",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "cat-search",
+      "from": "catalog",
+      "to": "search",
+      "label": "project",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pay-bus",
+      "from": "payments",
+      "to": "bus",
+      "label": "emit",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ]
+}

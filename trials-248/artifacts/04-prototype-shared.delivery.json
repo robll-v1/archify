@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "270a8517-8e7b-499a-b6fc-594b659f3941",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/tmp/trials/04-prototype-shared.json",
+  "output": "/private/tmp/scan2/04-prototype-shared.html",
+  "specification": {
+    "sha256": "b05b4f2ec9a29e6b745b115ab4fee6f63f6662c563874df85bc6a1df624d8f78",
+    "bytes": 987
+  },
+  "artifact": {
+    "sha256": "c4b32d9a9805cdb98566894a99228cb4581fe479b22b273eb23389831d190086",
+    "bytes": 781496
+  }
+}

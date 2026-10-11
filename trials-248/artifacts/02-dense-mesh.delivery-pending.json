@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "command": "deliver",
+  "status": "pending",
+  "receiptId": "5c077565-337c-4ae6-b7b0-8a4a6522fcff",
+  "input": "/tmp/trials/02-dense-mesh.json",
+  "output": "/private/tmp/scan2/02-dense-mesh.html"
+}
