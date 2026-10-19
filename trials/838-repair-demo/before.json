@@ -1,0 +1,76 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Before repair — group label blocks the drop handoff",
+    "output": "before.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "signals",
+      "label": "Signals"
+    },
+    {
+      "id": "responders",
+      "label": "Incident Command"
+    },
+    {
+      "id": "exceptions",
+      "label": "Escalation + Rollback",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "alert",
+    "page"
+  ],
+  "nodes": [
+    {
+      "id": "alert",
+      "lane": "signals",
+      "col": 0,
+      "type": "messagebus",
+      "label": "SLO Alert",
+      "sublabel": "burn rate"
+    },
+    {
+      "id": "page",
+      "lane": "responders",
+      "col": 1,
+      "width": 76,
+      "type": "external",
+      "label": "Page On-call",
+      "sublabel": "acknowledge"
+    },
+    {
+      "id": "rollback",
+      "lane": "exceptions",
+      "col": 5,
+      "type": "messagebus",
+      "label": "Rollback",
+      "sublabel": "last good"
+    }
+  ],
+  "edges": [
+    {
+      "from": "alert",
+      "to": "page",
+      "label": "page",
+      "variant": "emphasis",
+      "route": "drop",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "groups": [
+    {
+      "id": "command",
+      "label": "Incident command",
+      "lane": "responders",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    }
+  ]
+}
